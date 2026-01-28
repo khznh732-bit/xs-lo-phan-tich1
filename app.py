@@ -3,34 +3,32 @@ import pandas as pd
 import requests
 from collections import Counter
 from datetime import datetime
+import numpy as np
 
-st.set_page_config(page_title="AI Xổ Số TỰ ĐỘNG", layout="wide")
-st.title("🤖 AI PHÂN TÍCH GIẢI ĐẶC BIỆT – TỰ ĐỘNG 100%")
+st.set_page_config(page_title="AI Xổ Số PRO", layout="wide")
+st.title("🤖 AI Phân Tích Giải Đặc Biệt PRO")
 
-if "history" not in st.session_state:
-    st.session_state.history = []
+# ===== LẤY DỮ LIỆU =====
+@st.cache_data(ttl=600)
+def fetch_data(region, days):
+    url = "https://xoso.dev/api/mb.json" if region=="Miền Bắc" else "https://xoso.dev/api/mn.json"
+    r = requests.get(url, timeout=10)
+    data = r.json()["data"][:days]
+    df = pd.DataFrame(data)
+    df["special"] = df["giai_dac_biet"].astype(str)
+    df["two"] = df["special"].str[-2:]
+    df["date"] = pd.to_datetime(df["date"])
+    return df
 
-# ======= API TỰ ĐỘNG =======
-@st.cache_data(ttl=3600)
-def fetch_data(days):
-    try:
-        url = "https://api.xoso.dev/v1/mb/results"   # API mở
-        r = requests.get(url, timeout=10)
-        data = r.json()["data"][:days]
-
-        df = pd.DataFrame(data)
-        df["special"] = df["giai_dac_biet"]
-        df["two"] = df["special"].astype(str).str[-2:]
-        return df
-
-    except:
-        return None
-
-# ======= AI =======
-def ai_analysis(two_digits):
+# ===== AI =====
+def ai_analysis(df):
+    two_digits = df["two"].tolist()
     counter_total = Counter(two_digits)
-    recent = two_digits[-7:]
-    counter_recent = Counter(recent)
+    counter_recent = Counter(two_digits[:7])
+
+    df["weekday"] = df["date"].dt.weekday
+    today_w = datetime.now().weekday()
+    counter_weekday = Counter(df[df["weekday"]==today_w]["two"])
 
     all_numbers = [f"{i:02d}" for i in range(100)]
     results = []
@@ -38,61 +36,57 @@ def ai_analysis(two_digits):
     for num in all_numbers:
         freq = counter_total.get(num, 0)
         recent_freq = counter_recent.get(num, 0)
+        week_freq = counter_weekday.get(num, 0)
 
+        # GAN
         gan = 0
-        for d in reversed(two_digits):
+        for d in two_digits:
             if d != num:
                 gan += 1
             else:
                 break
 
-        positions = [i for i, x in enumerate(two_digits) if x == num]
-        if len(positions) > 1:
-            cycles = [positions[i+1]-positions[i] for i in range(len(positions)-1)]
-            cycle_avg = sum(cycles)/len(cycles)
-        else:
-            cycle_avg = len(two_digits)
+        # ===== PHÁT HIỆN BẤT THƯỜNG (SẮP NỔ) =====
+        expected = np.mean(list(counter_total.values()))
+        anomaly = (gan > expected*2) or (recent_freq==0 and freq>expected)
 
-        score = (freq*2.5)+(recent_freq*3)+(gan*1.2)+(10/(cycle_avg+1))
+        score = (freq*2.5)+(recent_freq*3)+(gan*1.2)+(week_freq*2)
+        if anomaly:
+            score *= 1.5  # tăng trọng số nếu có dấu hiệu
 
         results.append({
             "Số": num,
             "Tần suất": freq,
             "7 ngày": recent_freq,
+            "Cùng thứ": week_freq,
             "Gan": gan,
-            "Chu kỳ TB": round(cycle_avg,2),
+            "🔥 Sắp nổ": "⚠️" if anomaly else "",
             "Điểm AI": round(score,2)
         })
 
-    df = pd.DataFrame(results)
-    return df.sort_values(by="Điểm AI", ascending=False)
+    df_res = pd.DataFrame(results)
+    return df_res.sort_values(by="Điểm AI", ascending=False)
 
-# ======= UI =======
-st.subheader("⚙️ CÀI ĐẶT")
-days = st.slider("Phân tích bao nhiêu ngày gần nhất?", 30, 200, 90)
+# ===== UI =====
+col1, col2 = st.columns(2)
+region = col1.selectbox("Chọn miền", ["Miền Bắc","Miền Nam"])
+days = col2.slider("Số ngày phân tích", 30, 120, 60)
 
-if st.button("🚀 CHẠY AI TỰ ĐỘNG"):
-    df_data = fetch_data(days)
+if st.button("🚀 Chạy AI"):
+    try:
+        df_data = fetch_data(region, days)
+        result = ai_analysis(df_data)
 
-    if df_data is None:
-        st.error("Không lấy được dữ liệu. Thử lại sau.")
-    else:
-        two_digits = df_data["two"].tolist()
-        result_df = ai_analysis(two_digits)
+        st.subheader(f"🎯 TOP 12 AI – {region}")
+        st.dataframe(result.head(12))
+        st.bar_chart(result.head(10).set_index("Số"))
 
-        st.subheader("🎯 TOP 12 AI ĐỀ XUẤT")
-        top12 = result_df.head(12)
-        st.dataframe(top12)
-        st.bar_chart(result_df.head(10).set_index("Số"))
+        st.subheader("🔥 SỐ CÓ DẤU HIỆU SẮP NỔ")
+        hot = result[result["🔥 Sắp nổ"]=="⚠️"].head(6)
+        if not hot.empty:
+            st.dataframe(hot)
+        else:
+            st.write("Chưa phát hiện bất thường mạnh.")
 
-        st.session_state.history.append({
-            "Thời gian": datetime.now().strftime("%d-%m %H:%M"),
-            "Top số": ", ".join(top12["Số"])
-        })
-
-# ======= LỊCH SỬ =======
-st.subheader("📜 LỊCH SỬ PHÂN TÍCH")
-if st.session_state.history:
-    st.dataframe(pd.DataFrame(st.session_state.history))
-else:
-    st.write("Chưa có lịch sử.")
+    except:
+        st.error("Không lấy được dữ liệu.")
