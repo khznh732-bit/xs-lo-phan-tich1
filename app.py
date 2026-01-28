@@ -4,35 +4,30 @@ import requests
 from collections import Counter
 from datetime import datetime
 
-st.set_page_config(page_title="AI Xổ Số PRO MAX", layout="wide")
-st.title("🤖 AI TỰ ĐỘNG PHÂN TÍCH LÔ 2 SỐ TỪ GIẢI ĐẶC BIỆT")
+st.set_page_config(page_title="AI Xổ Số TỰ ĐỘNG", layout="wide")
+st.title("🤖 AI PHÂN TÍCH GIẢI ĐẶC BIỆT – TỰ ĐỘNG 100%")
 
-# ================= LƯU LỊCH SỬ =================
 if "history" not in st.session_state:
     st.session_state.history = []
 
-# ================= HÀM LẤY DỮ LIỆU =================
-def lay_du_lieu(mien, so_ngay):
-    if mien == "Miền Bắc":
-        url = "https://api.xoso.dev/v1/results/mb"
-    else:
-        url = "https://api.xoso.dev/v1/results/mn"
-
+# ======= API TỰ ĐỘNG =======
+@st.cache_data(ttl=3600)
+def fetch_data(days):
     try:
+        url = "https://api.xoso.dev/v1/mb/results"   # API mở
         r = requests.get(url, timeout=10)
-        data = r.json()
+        data = r.json()["data"][:days]
 
-        results = []
-        for item in data[:so_ngay]:
-            db = item["specialPrize"]
-            results.append(str(db)[-2:])
+        df = pd.DataFrame(data)
+        df["special"] = df["giai_dac_biet"]
+        df["two"] = df["special"].astype(str).str[-2:]
+        return df
 
-        return results
     except:
-        return []
+        return None
 
-# ================= AI PHÂN TÍCH =================
-def phan_tich_ai(two_digits):
+# ======= AI =======
+def ai_analysis(two_digits):
     counter_total = Counter(two_digits)
     recent = two_digits[-7:]
     counter_recent = Counter(recent)
@@ -44,7 +39,6 @@ def phan_tich_ai(two_digits):
         freq = counter_total.get(num, 0)
         recent_freq = counter_recent.get(num, 0)
 
-        # Gan
         gan = 0
         for d in reversed(two_digits):
             if d != num:
@@ -52,71 +46,53 @@ def phan_tich_ai(two_digits):
             else:
                 break
 
-        # Chu kỳ trung bình
         positions = [i for i, x in enumerate(two_digits) if x == num]
         if len(positions) > 1:
-            cycles = [positions[i+1] - positions[i] for i in range(len(positions)-1)]
-            cycle_avg = sum(cycles) / len(cycles)
+            cycles = [positions[i+1]-positions[i] for i in range(len(positions)-1)]
+            cycle_avg = sum(cycles)/len(cycles)
         else:
             cycle_avg = len(two_digits)
 
-        # Chu kỳ tuần (5–8 ngày)
-        week_cycle_score = 5 if 5 <= cycle_avg <= 8 else 0
-
-        score = (freq * 2.5) + (recent_freq * 3) + (gan * 1.2) + (10 / (cycle_avg + 1)) + week_cycle_score
+        score = (freq*2.5)+(recent_freq*3)+(gan*1.2)+(10/(cycle_avg+1))
 
         results.append({
             "Số": num,
             "Tần suất": freq,
-            "7 ngày gần": recent_freq,
+            "7 ngày": recent_freq,
             "Gan": gan,
             "Chu kỳ TB": round(cycle_avg,2),
-            "Điểm chu kỳ tuần": week_cycle_score,
             "Điểm AI": round(score,2)
         })
 
     df = pd.DataFrame(results)
     return df.sort_values(by="Điểm AI", ascending=False)
 
-# ================= GIAO DIỆN =================
+# ======= UI =======
 st.subheader("⚙️ CÀI ĐẶT")
-
-mien = st.radio("Chọn miền", ["Miền Bắc", "Miền Nam"])
-so_ngay = st.slider("Phân tích bao nhiêu ngày gần nhất?", 30, 120, 60)
+days = st.slider("Phân tích bao nhiêu ngày gần nhất?", 30, 200, 90)
 
 if st.button("🚀 CHẠY AI TỰ ĐỘNG"):
+    df_data = fetch_data(days)
 
-    with st.spinner("Đang lấy dữ liệu và phân tích..."):
-        two_digits = lay_du_lieu(mien, so_ngay)
-
-    if len(two_digits) < 20:
+    if df_data is None:
         st.error("Không lấy được dữ liệu. Thử lại sau.")
     else:
-        df = phan_tich_ai(two_digits)
+        two_digits = df_data["two"].tolist()
+        result_df = ai_analysis(two_digits)
 
-        st.subheader(f"📊 KẾT QUẢ AI — {mien}")
-        st.dataframe(df)
+        st.subheader("🎯 TOP 12 AI ĐỀ XUẤT")
+        top12 = result_df.head(12)
+        st.dataframe(top12)
+        st.bar_chart(result_df.head(10).set_index("Số"))
 
-        st.subheader("🎯 TOP 12 SỐ ĐỀ XUẤT")
-        top12 = df.head(12)
-        st.write(top12)
-
-        st.subheader("📈 BIỂU ĐỒ XU HƯỚNG")
-        st.bar_chart(df.head(10).set_index("Số"))
-
-        # Lưu lịch sử
         st.session_state.history.append({
             "Thời gian": datetime.now().strftime("%d-%m %H:%M"),
-            "Miền": mien,
-            "Chu kỳ": so_ngay,
             "Top số": ", ".join(top12["Số"])
         })
 
-# ================= LỊCH SỬ =================
+# ======= LỊCH SỬ =======
 st.subheader("📜 LỊCH SỬ PHÂN TÍCH")
-
 if st.session_state.history:
-    history_df = pd.DataFrame(st.session_state.history)
-    st.dataframe(history_df)
+    st.dataframe(pd.DataFrame(st.session_state.history))
 else:
     st.write("Chưa có lịch sử.")
