@@ -1,84 +1,53 @@
 import streamlit as st
 import pandas as pd
-import requests
-import re
-from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
+from collections import Counter
 
-st.set_page_config(page_title="Phân tích Lô 2 số", layout="centered")
+st.title("📊 Phân Tích Lô Theo Giải Đặc Biệt")
 
-st.title("🎯 PHÂN TÍCH LÔ 2 SỐ TỪ GIẢI ĐẶC BIỆT")
+st.write("Nhập danh sách giải đặc biệt các ngày gần đây (mỗi dòng 1 kết quả)")
 
-# ===================== LẤY DỮ LIỆU =====================
-@st.cache_data
-def fetch_data(days):
-    url = "https://xskt.com.vn/xsmb"
-    html = requests.get(url, timeout=10).text
+input_data = st.text_area("Ví dụ:\n843921\n12058\n77634\n99012")
 
-    db_numbers = re.findall(r'ĐB</td><td.*?>(\d{5})', html)
-    lo_2_so = [n[-2:] for n in db_numbers]
+if st.button("Phân tích"):
+    lines = input_data.strip().split("\n")
 
-    dates = [datetime.today() - timedelta(days=i) for i in range(len(lo_2_so))]
-    df = pd.DataFrame({"date": dates, "lo": lo_2_so})
+    # Lấy 2 số cuối
+    two_digits = [line.strip()[-2:] for line in lines if line.strip().isdigit()]
 
-    cutoff = datetime.today() - timedelta(days=days)
-    return df[df["date"] >= cutoff]
+    if len(two_digits) == 0:
+        st.warning("Không có dữ liệu hợp lệ")
+        st.stop()
 
-# ===================== GIAO DIỆN =====================
-days = st.slider("Chọn số ngày phân tích", 30, 365, 90)
+    counter = Counter(two_digits)
 
-if st.button("📥 CẬP NHẬT DỮ LIỆU"):
-    st.session_state["data"] = fetch_data(days)
-    st.success("Đã cập nhật dữ liệu")
+    all_numbers = [f"{i:02d}" for i in range(100)]
 
-if "data" in st.session_state:
-    df = st.session_state["data"]
+    results = []
 
-    st.subheader("📊 THỐNG KÊ")
+    for num in all_numbers:
+        count = counter.get(num, 0)
 
-    freq = df["lo"].value_counts().reset_index()
-    freq.columns = ["lo", "frequency"]
+        # Tính gan (bao nhiêu ngày chưa xuất hiện)
+        gan = 0
+        for d in reversed(two_digits):
+            if d != num:
+                gan += 1
+            else:
+                break
 
-    all_lo = pd.DataFrame({"lo": [f"{i:02d}" for i in range(100)]})
-    stats = all_lo.merge(freq, on="lo", how="left").fillna(0)
+        results.append({
+            "Số": num,
+            "Số lần về": count,
+            "Gan (ngày chưa về)": gan
+        })
 
-    # Tính gan thật
-    gan_list = []
-    for lo in stats["lo"]:
-        if lo in df["lo"].values:
-            last_date = df[df["lo"] == lo]["date"].max()
-            gan = (datetime.today() - last_date).days
-        else:
-            gan = days
-        gan_list.append(gan)
+    df = pd.DataFrame(results)
 
-    stats["gan"] = gan_list
-    stats["score"] = stats["frequency"] * 0.5 + stats["gan"] * 0.5
+    st.subheader("📋 Bảng thống kê")
+    st.dataframe(df.sort_values(by="Số lần về", ascending=False))
 
-    # TOP số đáng chú ý
-    st.write("🔥 TOP LÔ ĐÁNG CHÚ Ý")
-    st.dataframe(stats.sort_values("score", ascending=False).head(10), use_container_width=True)
+    st.subheader("🔥 Top 10 số ra nhiều nhất")
+    st.write(df.sort_values(by="Số lần về", ascending=False).head(10))
 
-    # Lô không về
-    st.write("❄️ LÔ KHÔNG VỀ")
-    st.dataframe(stats[stats["frequency"] == 0], use_container_width=True)
-
-    # Lô rơi (xuất hiện liên tiếp)
-    st.write("🔁 LÔ RƠI")
-    df_sorted = df.sort_values("date")
-    df_sorted["prev"] = df_sorted["lo"].shift(1)
-    roi = df_sorted[df_sorted["lo"] == df_sorted["prev"]]["lo"].unique()
-    st.write(list(roi))
-
-    # Biểu đồ gan
-    st.write("📈 BIỂU ĐỒ GAN CAO NHẤT")
-    top_gan = stats.sort_values("gan", ascending=False).head(10)
-
-    fig, ax = plt.subplots()
-    ax.bar(top_gan["lo"], top_gan["gan"])
-    ax.set_ylabel("Số ngày chưa ra")
-    ax.set_xlabel("Lô")
-    st.pyplot(fig)
-
-else:
-    st.info("👉 Bấm 'CẬP NHẬT DỮ LIỆU' để bắt đầu")
+    st.subheader("📈 Top 10 số gan cao nhất")
+    st.write(df.sort_values(by="Gan (ngày chưa về)", ascending=False).head(10))
