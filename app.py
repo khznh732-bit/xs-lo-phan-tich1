@@ -1,24 +1,44 @@
 import streamlit as st
 import pandas as pd
+import requests
 from collections import Counter
 from datetime import datetime
 
 st.set_page_config(page_title="AI Xổ Số PRO MAX", layout="wide")
 
-st.title("🤖 AI PHÂN TÍCH LÔ + CHU KỲ TUẦN")
+st.title("🤖 AI TỰ ĐỘNG PHÂN TÍCH LÔ 2 SỐ")
 
+# Lưu lịch sử
 if "history" not in st.session_state:
     st.session_state.history = []
 
-mien = st.radio("Chọn miền:", ["Miền Bắc", "Miền Nam"])
+# ================= LẤY DỮ LIỆU TỰ ĐỘNG =================
+def lay_du_lieu(mien, so_ngay):
+    if mien == "Miền Bắc":
+        url = "https://xskt.com.vn/rss-feed/mien-bac-xsmb.rss"
+    else:
+        url = "https://xskt.com.vn/rss-feed/mien-nam-xsmn.rss"
 
-data = st.text_area("Dán kết quả giải đặc biệt (mỗi dòng 1 số)")
+    try:
+        r = requests.get(url, timeout=10)
+        content = r.text.split("<description>")
+        results = []
 
+        for item in content[1:so_ngay+1]:
+            text = item.split("</description>")[0]
+            if "ĐB:" in text:
+                db = text.split("ĐB:")[1].split(" ")[0]
+                results.append(db[-2:])
+
+        return results
+    except:
+        return []
+
+# ================= AI PHÂN TÍCH =================
 def phan_tich_ai(two_digits):
     counter_total = Counter(two_digits)
     recent = two_digits[-7:]
     counter_recent = Counter(recent)
-
     all_numbers = [f"{i:02d}" for i in range(100)]
     results = []
 
@@ -33,7 +53,6 @@ def phan_tich_ai(two_digits):
             else:
                 break
 
-        # Chu kỳ
         positions = [i for i, x in enumerate(two_digits) if x == num]
         if len(positions) > 1:
             cycles = [positions[i+1] - positions[i] for i in range(len(positions)-1)]
@@ -41,10 +60,8 @@ def phan_tich_ai(two_digits):
         else:
             cycle_avg = len(two_digits)
 
-        # Chu kỳ tuần (5–8 ngày)
-        week_cycle_score = 0
-        if 5 <= cycle_avg <= 8:
-            week_cycle_score = 5
+        # Chu kỳ tuần
+        week_cycle_score = 5 if 5 <= cycle_avg <= 8 else 0
 
         score = (freq * 2.5) + (recent_freq * 3) + (gan * 1.2) + (10 / (cycle_avg + 1)) + week_cycle_score
 
@@ -61,31 +78,43 @@ def phan_tich_ai(two_digits):
     df = pd.DataFrame(results)
     return df.sort_values(by="Điểm AI", ascending=False)
 
+# ================= GIAO DIỆN =================
+st.subheader("⚙️ CÀI ĐẶT PHÂN TÍCH")
 
-if st.button("🚀 CHẠY AI"):
-    lines = data.strip().split("\n")
-    two_digits = [line.strip()[-2:] for line in lines if line.strip().isdigit()]
+mien = st.radio("Chọn miền", ["Miền Bắc", "Miền Nam"])
+so_ngay = st.slider("Phân tích chu kỳ bao nhiêu ngày?", 30, 120, 60)
+
+if st.button("🚀 CHẠY AI TỰ ĐỘNG"):
+
+    two_digits = lay_du_lieu(mien, so_ngay)
 
     if len(two_digits) < 20:
-        st.error("Cần ít nhất 20 ngày dữ liệu")
+        st.error("Không lấy được dữ liệu. Thử lại sau.")
     else:
         df = phan_tich_ai(two_digits)
 
-        st.subheader("🎯 TOP 12 SỐ AI ĐỀ XUẤT")
-        st.write(df.head(12))
+        st.subheader(f"📊 KẾT QUẢ AI — {mien}")
+        st.dataframe(df)
 
+        st.subheader("🎯 TOP 12 SỐ ĐỀ XUẤT")
+        top12 = df.head(12)
+        st.write(top12)
+
+        st.subheader("📈 BIỂU ĐỒ XU HƯỚNG")
         st.bar_chart(df.head(10).set_index("Số"))
 
         # Lưu lịch sử
         st.session_state.history.append({
             "Thời gian": datetime.now().strftime("%d-%m %H:%M"),
             "Miền": mien,
-            "Top số": ", ".join(df.head(5)["Số"])
+            "Chu kỳ": so_ngay,
+            "Top số": ", ".join(top12["Số"])
         })
 
+# ================= LỊCH SỬ =================
 st.subheader("📜 LỊCH SỬ PHÂN TÍCH")
 if st.session_state.history:
     history_df = pd.DataFrame(st.session_state.history)
     st.dataframe(history_df)
 else:
-    st.write("Chưa có dữ liệu lịch sử.")
+    st.write("Chưa có lịch sử.")
