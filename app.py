@@ -1,12 +1,10 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 from collections import Counter
-from sklearn.ensemble import RandomForestClassifier
 
-st.title("🤖 AI PRO Dự Đoán Lô 2 Số Từ Giải Đặc Biệt")
+st.title("🤖 AI PRO Phân Tích Lô 2 Số")
 
-st.write("Dán danh sách giải đặc biệt (mỗi dòng 1 kết quả)")
+st.write("Dán kết quả giải đặc biệt (mỗi dòng 1 số)")
 
 input_data = st.text_area("Ví dụ:\n843921\n12058\n77634\n99012")
 
@@ -15,64 +13,22 @@ if st.button("Chạy AI PRO"):
     lines = input_data.strip().split("\n")
     two_digits = [line.strip()[-2:] for line in lines if line.strip().isdigit()]
 
-    if len(two_digits) < 20:
-        st.warning("Cần ít nhất 20 ngày dữ liệu")
+    if len(two_digits) < 15:
+        st.warning("Cần ít nhất 15 ngày dữ liệu")
         st.stop()
 
-    all_numbers = [f"{i:02d}" for i in range(100)]
-
-    # ===== TẠO FEATURE =====
-    X = []
-    y = []
-
-    for i in range(10, len(two_digits)-1):
-        past = two_digits[:i]
-        next_num = two_digits[i]
-
-        counter_total = Counter(past)
-        recent = past[-7:]
-        counter_recent = Counter(recent)
-
-        features = []
-        for num in all_numbers:
-            freq = counter_total.get(num, 0)
-            recent_freq = counter_recent.get(num, 0)
-
-            gan = 0
-            for d in reversed(past):
-                if d != num:
-                    gan += 1
-                else:
-                    break
-
-            features.append([freq, recent_freq, gan])
-
-        # nhãn: số xuất hiện ngày tiếp theo
-        label = all_numbers.index(next_num)
-
-        X.append(features)
-        y.append(label)
-
-    X = np.array(X)
-    y = np.array(y)
-
-    # reshape cho ML
-    X = X.reshape(len(X), -1)
-
-    # ===== TRAIN AI =====
-    model = RandomForestClassifier(n_estimators=200)
-    model.fit(X, y)
-
-    # ===== DỰ ĐOÁN NGÀY TIẾP =====
     counter_total = Counter(two_digits)
     recent = two_digits[-7:]
     counter_recent = Counter(recent)
 
-    features = []
+    all_numbers = [f"{i:02d}" for i in range(100)]
+    results = []
+
     for num in all_numbers:
         freq = counter_total.get(num, 0)
         recent_freq = counter_recent.get(num, 0)
 
+        # Tính gan
         gan = 0
         for d in reversed(two_digits):
             if d != num:
@@ -80,18 +36,32 @@ if st.button("Chạy AI PRO"):
             else:
                 break
 
-        features.append([freq, recent_freq, gan])
+        # Chu kỳ trung bình
+        positions = [i for i, x in enumerate(two_digits) if x == num]
+        if len(positions) > 1:
+            cycles = [positions[i+1] - positions[i] for i in range(len(positions)-1)]
+            cycle_avg = sum(cycles) / len(cycles)
+        else:
+            cycle_avg = len(two_digits)
 
-    X_pred = np.array(features).reshape(1, -1)
+        # AI Score ổn định
+        score = (freq * 2.5) + (recent_freq * 3) + (gan * 1.2) + (10 / (cycle_avg + 1))
 
-    probs = model.predict_proba(X_pred)[0]
+        results.append({
+            "Số": num,
+            "Tần suất": freq,
+            "7 ngày gần": recent_freq,
+            "Gan": gan,
+            "Chu kỳ TB": round(cycle_avg,2),
+            "Điểm AI": round(score,2)
+        })
 
-    results = pd.DataFrame({
-        "Số": all_numbers,
-        "Xác suất AI": probs
-    }).sort_values(by="Xác suất AI", ascending=False)
+    df = pd.DataFrame(results)
 
-    st.subheader("🎯 TOP 15 SỐ AI ĐỀ XUẤT")
-    st.dataframe(results.head(15))
+    st.subheader("📊 Bảng phân tích AI")
+    st.dataframe(df.sort_values(by="Điểm AI", ascending=False))
 
-    st.bar_chart(results.set_index("Số").head(10))
+    st.subheader("🎯 TOP 12 SỐ AI ĐỀ XUẤT")
+    st.write(df.sort_values(by="Điểm AI", ascending=False).head(12))
+
+    st.bar_chart(df.sort_values(by="Điểm AI", ascending=False).head(10).set_index("Số"))
