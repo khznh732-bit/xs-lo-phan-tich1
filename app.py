@@ -1,37 +1,44 @@
 import streamlit as st
 import pandas as pd
-from collections import Counter
 import numpy as np
+from collections import Counter
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="AI Lô Chu Kỳ Tuần", layout="wide")
+st.set_page_config(page_title="AI Xác Suất Lô 2 Số", layout="wide")
 
-st.title("🤖 AI PHÂN TÍCH LÔ + CHU KỲ TUẦN")
+st.title("🎯 AI TÍNH XÁC SUẤT LÔ 2 SỐ NGÀY MAI")
 
-# ================= NHẬP DỮ LIỆU =================
-st.subheader("📥 Dán kết quả giải đặc biệt (mỗi dòng 1 số)")
+st.markdown("Dán kết quả lô 2 số mỗi ngày (mỗi dòng = 1 ngày)")
 
-raw_data = st.text_area("Ví dụ:\n12345\n67890\n11223")
+raw = st.text_area("Nhập dữ liệu")
 
-if "history" not in st.session_state:
-    st.session_state.history = []
+# ====== PHÂN TÍCH ======
+def analyze(data_lines):
+    days = []
+    for line in data_lines:
+        nums = [x.zfill(2) for x in line.split() if x.isdigit()]
+        days.append(nums)
 
-# ================= HÀM PHÂN TÍCH =================
-def analyze(numbers):
-    df = pd.DataFrame({"special": numbers})
-    df["two"] = df["special"].str[-2:]
-
-    # Ngày giả lập (lùi dần)
     today = datetime.now()
-    df["date"] = [today - timedelta(days=i) for i in range(len(df))]
-    df["weekday"] = df["date"].dt.weekday
+    tomorrow_weekday = (today.weekday() + 1) % 7
 
-    two_list = df["two"].tolist()
+    flat = [n for day in days for n in day]
+    total_freq = Counter(flat)
 
-    total_freq = Counter(two_list)
-    last7_freq = Counter(two_list[:7])
-    today_w = datetime.now().weekday()
-    weekday_freq = Counter(df[df["weekday"] == today_w]["two"])
+    last7 = [n for day in days[:7] for n in day]
+    last7_freq = Counter(last7)
+
+    # Gán ngày giả lập
+    weekday_map = {}
+    for i, day in enumerate(days):
+        date = today - timedelta(days=i)
+        weekday_map[i] = date.weekday()
+
+    weekday_freq = Counter()
+    for i, day in enumerate(days):
+        if weekday_map[i] == tomorrow_weekday:
+            for n in day:
+                weekday_freq[n] += 1
 
     avg = np.mean(list(total_freq.values()))
 
@@ -45,58 +52,46 @@ def analyze(numbers):
 
         # GAN
         gan = 0
-        for n in two_list:
-            if n != num:
+        for day in days:
+            if num not in day:
                 gan += 1
             else:
                 break
 
-        # BẤT THƯỜNG = SẮP NỔ
-        anomaly = (gan > avg*2) or (recent == 0 and freq > avg)
+        # XÁC SUẤT AI
+        score = (freq*2.2) + (recent*3.5) + (gan*1.5) + (week*2.5)
 
-        score = (freq*2.5) + (recent*3) + (gan*1.3) + (week*2)
-        if anomaly:
-            score *= 1.5
+        # Chuẩn hoá thành %
+        prob = score / (avg * 10) * 100
 
         results.append({
             "Số": num,
             "Tần suất": freq,
             "7 ngày": recent,
-            "Cùng thứ hôm nay": week,
+            "Cùng thứ ngày mai": week,
             "Gan": gan,
-            "🔥 Sắp nổ": "⚠️" if anomaly else "",
-            "Điểm AI": round(score, 2)
+            "Xác suất AI (%)": round(prob, 2)
         })
 
-    return pd.DataFrame(results).sort_values(by="Điểm AI", ascending=False)
+    df = pd.DataFrame(results)
+    return df.sort_values(by="Xác suất AI (%)", ascending=False)
 
-# ================= CHẠY AI =================
-if st.button("🚀 CHẠY AI"):
-    nums = [x.strip() for x in raw_data.split("\n") if x.strip().isdigit() and len(x.strip()) == 5]
-
-    if len(nums) < 10:
-        st.warning("Cần ít nhất 10 ngày dữ liệu")
+# ====== CHẠY ======
+if st.button("🚀 TÍNH XÁC SUẤT NGÀY MAI"):
+    lines = [x.strip() for x in raw.split("\n") if x.strip()]
+    
+    if len(lines) < 15:
+        st.warning("Cần ít nhất 15 ngày dữ liệu")
     else:
-        result = analyze(nums)
+        result = analyze(lines)
 
-        st.subheader("🎯 TOP 12 AI")
-        st.dataframe(result.head(12), use_container_width=True)
-        st.bar_chart(result.head(10).set_index("Số")["Điểm AI"])
+        st.subheader("🔥 TOP 15 SỐ XÁC SUẤT CAO NHẤT")
+        st.dataframe(result.head(15), use_container_width=True)
+        st.bar_chart(result.head(10).set_index("Số")["Xác suất AI (%)"])
 
-        st.subheader("🔥 NHÓM SỐ CÓ DẤU HIỆU SẮP NỔ")
-        hot = result[result["🔥 Sắp nổ"] == "⚠️"].head(6)
-        if not hot.empty:
-            st.dataframe(hot, use_container_width=True)
-        else:
-            st.write("Chưa có số bất thường mạnh")
+        st.subheader("💣 NHÓM GAN CAO (DỄ BẬT)")
+        gan_df = result.sort_values(by="Gan", ascending=False).head(10)
+        st.dataframe(gan_df, use_container_width=True)
 
-        st.session_state.history.append(result.head(5))
-
-# ================= LỊCH SỬ =================
-st.subheader("📜 LỊCH SỬ PHÂN TÍCH")
-if st.session_state.history:
-    for i, h in enumerate(st.session_state.history[::-1]):
-        st.write(f"Lần {len(st.session_state.history)-i}")
-        st.dataframe(h, use_container_width=True)
-else:
-    st.write("Chưa có dữ liệu lịch sử")
+        st.subheader("📊 PHÂN BỐ XÁC SUẤT")
+        st.line_chart(result["Xác suất AI (%)"])
